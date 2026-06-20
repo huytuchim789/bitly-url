@@ -7,13 +7,11 @@ export const getServerSideProps: GetServerSideProps = async ({ params }) => {
   if (!short) return { notFound: true }
 
   try {
-    const res = await fetch(`${API_BASE}/${short}`, { redirect: "manual" })
+    const res = await fetch(`${API_BASE}/api/urls/${short}`)
 
-    if (res.status === 302) {
-      const location = res.headers.get("location")
-      if (location) {
-        return { redirect: { destination: location, permanent: false } }
-      }
+    if (res.ok) {
+      const data = await res.json() as { original: string }
+      return { redirect: { destination: data.original, permanent: false } }
     }
   } catch {
     // fetch failed, fall through to notFound

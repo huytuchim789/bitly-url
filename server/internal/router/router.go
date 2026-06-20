@@ -26,7 +26,8 @@ func New(h *handler.URLHandler) *gin.Engine {
 	api := r.Group("/api")
 	{
 		api.POST("/shorten", h.Shorten)
-		api.GET("/urls", h.List)
+			api.GET("/urls", h.List)
+		api.GET("/urls/:short", h.GetByShort)
 	}
 
 	r.GET("/:short", h.Redirect)

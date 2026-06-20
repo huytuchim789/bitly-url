@@ -65,6 +65,25 @@ func (h *URLHandler) Redirect(c *gin.Context) {
 	c.Redirect(http.StatusFound, url.Original)
 }
 
+// GetByShort godoc
+// @Summary      Get URL by short code
+// @Description  Get the original URL for a short code
+// @Tags         urls
+// @Produce      json
+// @Param        short path string true "Short code"
+// @Success      200  {object}  entity.URL
+// @Failure      404  {object}  map[string]string
+// @Router       /api/urls/{short} [get]
+func (h *URLHandler) GetByShort(c *gin.Context) {
+	short := c.Param("short")
+	url, err := h.uc.FindByShort(c.Request.Context(), short)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, url)
+}
+
 // List       godoc
 // @Summary      List all URLs
 // @Description  Get all shortened URLs
