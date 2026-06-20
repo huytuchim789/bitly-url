@@ -1,4 +1,5 @@
 import type { ShortenedUrl } from "@/entities/url"
+import { API_BASE } from "@/shared/api/base"
 import { Card, CardContent } from "@/shared/ui/card"
 import { Skeleton } from "@/shared/ui/skeleton"
 
@@ -30,7 +31,7 @@ export function UrlList({ urls, isLoading }: UrlListProps) {
             <span className="flex-1 truncate text-sm">{url.original}</span>
             <span className="text-muted-foreground">→</span>
             <a
-              href={`/${url.short}`}
+              href={`${API_BASE}/${url.short}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary hover:underline font-mono text-sm shrink-0"

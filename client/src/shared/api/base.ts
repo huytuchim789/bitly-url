@@ -1,4 +1,8 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || ""
+// Backend API base URL
+// - If NEXT_PUBLIC_API_URL is set (production behind Nginx), use it
+// - Local dev (NODE_ENV=development): frontend :3000 calls backend :8080 directly
+// - Default: same origin (Nginx proxies /api/* and /:short to backend)
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === "development" ? "http://localhost:8080" : "")
 
 class ApiError extends Error {
   constructor(
