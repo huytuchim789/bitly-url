@@ -3,3 +3,13 @@ scrape_configs:
     scrape_interval: 15s
     static_configs:
       - targets: ["server:8080"]
+
+  - job_name: "bitly-postgres"
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  - job_name: "bitly-redis"
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["redis-exporter:9121"]

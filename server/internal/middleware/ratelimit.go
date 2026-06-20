@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"net/http"
+	"strconv"
 	"time"
 
 	"bitly-url/internal/cache"
@@ -52,8 +52,8 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 			return
 		}
 
-		c.Header("X-RateLimit-Limit", http.StatusText(rl.limit))
-		c.Header("X-RateLimit-Remaining", http.StatusText(rl.limit-int(count)))
+		c.Header("X-RateLimit-Limit", strconv.Itoa(rl.limit))
+		c.Header("X-RateLimit-Remaining", strconv.Itoa(rl.limit-int(count)))
 		c.Next()
 	}
 }

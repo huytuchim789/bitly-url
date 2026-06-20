@@ -120,8 +120,14 @@ func (h *URLHandler) GetByShort(c *gin.Context) {
 // @Failure      500  {object}  map[string]string
 // @Router       /api/urls [get]
 func (h *URLHandler) List(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if err != nil {
+		limit = 50
+	}
+	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if err != nil {
+		offset = 0
+	}
 
 	urls, err := h.uc.FindAll(c.Request.Context(), limit, offset)
 	if err != nil {

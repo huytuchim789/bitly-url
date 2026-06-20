@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"bitly-url/internal/entity"
@@ -78,7 +79,7 @@ func (r *URLPostgresRepo) scanURL(row pgx.Row) (*entity.URL, error) {
 	var url entity.URL
 	err := row.Scan(&url.ID, &url.Short, &url.Original, &url.Clicks, &url.ExpiresAt, &url.CreatedAt, &url.UpdatedAt)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("url not found: %w", err)
 		}
 		return nil, fmt.Errorf("failed to scan url: %w", err)
@@ -104,10 +105,10 @@ func (r *ClickPostgresRepo) BatchInsert(ctx context.Context, clicks []*entity.Cl
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`
 
 	for _, c := range clicks {
-		batch.Queue(query, c.ID, c.ShortID, c.IP, c.UserAgent, c.Referer, c.Country, c.Timestamp)
 		if c.ID == uuid.Nil {
 			c.ID = uuid.New()
 		}
+		batch.Queue(query, c.ID, c.ShortID, c.IP, c.UserAgent, c.Referer, c.Country, c.Timestamp)
 	}
 
 	br := r.db.SendBatch(ctx, batch)

@@ -3,21 +3,22 @@ package usecase
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
 	"net"
 	"net/url"
-	"strings"
 	"time"
 
 	"bitly-url/internal/cache"
 	"bitly-url/internal/entity"
 	"bitly-url/internal/metrics"
-	"bitly-url/internal/pkg/errors"
+	apperrors "bitly-url/internal/pkg/errors"
 	"bitly-url/internal/repository"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const (
@@ -28,15 +29,22 @@ const (
 )
 
 type URLUseCase struct {
-	repo       repository.URLRepository
-	cache      cache.Cache
+	repo      repository.URLRepository
+	clickRepo repository.ClickRepository
+	cache     cache.Cache
+	ctx       context.Context
+	cancel    context.CancelFunc
 	clickQueue chan *entity.Click
 }
 
-func NewURLUseCase(repo repository.URLRepository, c cache.Cache) *URLUseCase {
+func NewURLUseCase(repo repository.URLRepository, clickRepo repository.ClickRepository, c cache.Cache, ctx context.Context) *URLUseCase {
+	ctx, cancel := context.WithCancel(ctx)
 	uc := &URLUseCase{
 		repo:       repo,
+		clickRepo:  clickRepo,
 		cache:      c,
+		ctx:        ctx,
+		cancel:     cancel,
 		clickQueue: make(chan *entity.Click, 10000),
 	}
 	go uc.clickWorker()
@@ -54,38 +62,38 @@ func (uc *URLUseCase) Shorten(ctx context.Context, original string) (*entity.URL
 	}
 
 	now := time.Now()
-	url := &entity.URL{
+	u := &entity.URL{
 		ID:        uuid.New(),
 		Short:     short,
 		Original:  original,
-		Clicks:    0,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 
-	if err := uc.repo.Save(ctx, url); err != nil {
-		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
-			return nil, errors.ErrShortCode
+	if err := uc.repo.Save(ctx, u); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, apperrors.ErrShortCode
 		}
 		slog.Error("failed to save url", "error", err)
-		return nil, errors.ErrInternal
+		return nil, apperrors.ErrInternal
 	}
 
-	uc.cache.Set(ctx, cacheKeyPrefix+short, original, cacheTTL)
-	return url, nil
+	uc.cacheSet(ctx, cacheKeyPrefix+short, original, cacheTTL)
+	return u, nil
 }
 
 func (uc *URLUseCase) FindByShort(ctx context.Context, short string) (*entity.URL, error) {
 	cacheKey := cacheKeyPrefix + short
 
-	if cached, err := uc.cache.Get(ctx, cacheKey); err == nil {
+	if cached, err := uc.cacheGet(ctx, cacheKey); err == nil {
 		metrics.CacheHitsTotal.Inc()
 		metrics.URLRedirectTotal.Inc()
 
 		if err := uc.validateRedirectTarget(cached); err != nil {
 			return nil, err
 		}
-		uc.cache.Incr(ctx, cacheKey+":clicks")
+		uc.cacheIncr(ctx, cacheKey+":clicks")
 
 		return &entity.URL{
 			Short:    short,
@@ -94,22 +102,22 @@ func (uc *URLUseCase) FindByShort(ctx context.Context, short string) (*entity.UR
 	}
 	metrics.CacheMissesTotal.Inc()
 
-	url, err := uc.repo.FindByShort(ctx, short)
+	u, err := uc.repo.FindByShort(ctx, short)
 	if err != nil {
-		return nil, errors.ErrNotFound
+		return nil, apperrors.ErrNotFound
 	}
 
-	if url.IsExpired() {
-		return nil, errors.ErrGone
+	if u.IsExpired() {
+		return nil, apperrors.ErrGone
 	}
 
-	if err := uc.validateRedirectTarget(url.Original); err != nil {
+	if err := uc.validateRedirectTarget(u.Original); err != nil {
 		return nil, err
 	}
 
 	metrics.URLRedirectTotal.Inc()
-	uc.cache.Set(ctx, cacheKey, url.Original, cacheTTL)
-	return url, nil
+	uc.cacheSet(ctx, cacheKey, u.Original, cacheTTL)
+	return u, nil
 }
 
 func (uc *URLUseCase) TrackClick(shortID uuid.UUID, ip, userAgent, referer string) {
@@ -130,7 +138,7 @@ func (uc *URLUseCase) FindAll(ctx context.Context, limit, offset int) ([]*entity
 	urls, err := uc.repo.FindAll(ctx, limit, offset)
 	if err != nil {
 		slog.Error("failed to list urls", "error", err)
-		return nil, errors.ErrInternal
+		return nil, apperrors.ErrInternal
 	}
 	return urls, nil
 }
@@ -138,7 +146,7 @@ func (uc *URLUseCase) FindAll(ctx context.Context, limit, offset int) ([]*entity
 func (uc *URLUseCase) Delete(ctx context.Context, id string) error {
 	if err := uc.repo.Delete(ctx, id); err != nil {
 		slog.Error("failed to delete url", "error", err)
-		return errors.ErrInternal
+		return apperrors.ErrInternal
 	}
 	return nil
 }
@@ -162,6 +170,11 @@ func (uc *URLUseCase) clickWorker() {
 				uc.flushClicks(buf)
 				buf = buf[:0]
 			}
+		case <-uc.ctx.Done():
+			if len(buf) > 0 {
+				uc.flushClicks(buf)
+			}
+			return
 		}
 	}
 }
@@ -170,25 +183,23 @@ func (uc *URLUseCase) flushClicks(clicks []*entity.Click) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if repo, ok := uc.repo.(interface{ BatchInsert(context.Context, []*entity.Click) error }); ok {
-		if err := repo.BatchInsert(ctx, clicks); err != nil {
-			slog.Error("failed to batch insert clicks", "error", err)
-		}
+	if err := uc.clickRepo.BatchInsert(ctx, clicks); err != nil {
+		slog.Error("failed to batch insert clicks", "error", err)
 	}
 }
 
 func (uc *URLUseCase) validateOriginal(raw string) error {
 	if len(raw) > maxURLSize {
-		return fmt.Errorf("url exceeds maximum length of %d characters: %w", maxURLSize, errors.ErrBadRequest)
+		return fmt.Errorf("url exceeds maximum length of %d characters: %w", maxURLSize, apperrors.ErrBadRequest)
 	}
 
 	u, err := url.ParseRequestURI(raw)
 	if err != nil {
-		return fmt.Errorf("invalid url: %w", errors.ErrBadRequest)
+		return fmt.Errorf("invalid url: %w", apperrors.ErrBadRequest)
 	}
 
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("url scheme must be http or https: %w", errors.ErrBadRequest)
+		return fmt.Errorf("url scheme must be http or https: %w", apperrors.ErrBadRequest)
 	}
 
 	if err := uc.validateRedirectTarget(raw); err != nil {
@@ -201,14 +212,45 @@ func (uc *URLUseCase) validateOriginal(raw string) error {
 func (uc *URLUseCase) validateRedirectTarget(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("invalid redirect target: %w", errors.ErrBadRequest)
+		return fmt.Errorf("invalid redirect target: %w", apperrors.ErrBadRequest)
 	}
 
-	hostname := strings.ToLower(u.Hostname())
+	hostname := u.Hostname()
 	if hostname == "" {
-		return errors.ErrBadRequest
+		return apperrors.ErrBadRequest
 	}
 
+	hostname = hostnameLower(hostname)
+
+	if isPrivateHost(hostname) {
+		return apperrors.ErrForbidden
+	}
+
+	ips, err := net.LookupIP(hostname)
+	if err == nil {
+		for _, ip := range ips {
+			if ip.IsPrivate() || ip.IsLoopback() || ip.IsUnspecified() {
+				return apperrors.ErrForbidden
+			}
+		}
+	}
+
+	return nil
+}
+
+func hostnameLower(s string) string {
+	b := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 32
+		}
+		b[i] = c
+	}
+	return string(b)
+}
+
+func isPrivateHost(hostname string) bool {
 	privateSuffixes := []string{
 		"localhost",
 		"127.0.0.1",
@@ -223,23 +265,12 @@ func (uc *URLUseCase) validateRedirectTarget(raw string) error {
 		"::1",
 		"fc00:", "fd00:",
 	}
-
 	for _, suffix := range privateSuffixes {
-		if strings.HasPrefix(hostname, suffix) {
-			return errors.ErrForbidden
+		if len(hostname) >= len(suffix) && hostname[:len(suffix)] == suffix {
+			return true
 		}
 	}
-
-	ips, err := net.LookupIP(hostname)
-	if err == nil {
-		for _, ip := range ips {
-			if ip.IsPrivate() || ip.IsLoopback() || ip.IsUnspecified() {
-				return errors.ErrForbidden
-			}
-		}
-	}
-
-	return nil
+	return false
 }
 
 func (uc *URLUseCase) generateUniqueShort(ctx context.Context) (string, error) {
@@ -249,22 +280,38 @@ func (uc *URLUseCase) generateUniqueShort(ctx context.Context) (string, error) {
 			return "", err
 		}
 
-		exists := true
 		cacheKey := cacheKeyPrefix + code
-		if _, err := uc.cache.Get(ctx, cacheKey); err != nil {
-			exists = false
-		} else {
+		if _, err := uc.cacheGet(ctx, cacheKey); err == nil {
 			continue
 		}
 
-		if !exists {
-			if _, err := uc.repo.FindByShort(ctx, code); err != nil {
-				return code, nil
-			}
+		if _, err := uc.repo.FindByShort(ctx, code); err != nil {
+			return code, nil
 		}
 	}
 
-	return "", fmt.Errorf("failed to generate unique short code after 10 attempts: %w", errors.ErrInternal)
+	return "", fmt.Errorf("failed to generate unique short code after 10 attempts: %w", apperrors.ErrInternal)
+}
+
+func (uc *URLUseCase) cacheGet(ctx context.Context, key string) (string, error) {
+	if uc.cache == nil {
+		return "", fmt.Errorf("cache disabled")
+	}
+	return uc.cache.Get(ctx, key)
+}
+
+func (uc *URLUseCase) cacheSet(ctx context.Context, key, value string, ttl time.Duration) {
+	if uc.cache == nil {
+		return
+	}
+	uc.cache.Set(ctx, key, value, ttl)
+}
+
+func (uc *URLUseCase) cacheIncr(ctx context.Context, key string) {
+	if uc.cache == nil {
+		return
+	}
+	uc.cache.Incr(ctx, key)
 }
 
 func generateShortCode() (string, error) {

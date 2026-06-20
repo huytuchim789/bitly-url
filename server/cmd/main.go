@@ -50,9 +50,11 @@ func main() {
 
 	urlRepo := postgres.NewURLPostgresRepo(db)
 	clickRepo := postgres.NewClickPostgresRepo(db)
-	_ = clickRepo
 
-	uc := usecase.NewURLUseCase(urlRepo, c)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	uc := usecase.NewURLUseCase(urlRepo, clickRepo, c, ctx)
 	h := handler.NewURLHandler(uc)
 	r := router.New(h, db, c)
 
@@ -60,9 +62,6 @@ func main() {
 		Addr:    ":" + cfg.Port,
 		Handler: r,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		slog.Info("server starting", "port", cfg.Port, "env", cfg.Environment)
