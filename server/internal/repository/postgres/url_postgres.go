@@ -50,7 +50,7 @@ func (r *URLPostgresRepo) FindAll(ctx context.Context) ([]*entity.URL, error) {
 	}
 	defer rows.Close()
 
-	var urls []*entity.URL
+	urls := make([]*entity.URL, 0)
 	for rows.Next() {
 		var url entity.URL
 		if err := rows.Scan(&url.ID, &url.Original, &url.Short, &url.CreatedAt); err != nil {

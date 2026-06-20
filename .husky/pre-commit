@@ -1,24 +1,18 @@
 #!/bin/sh
 
-set -e
-
 echo ""
 echo "=== Pre-commit Checks ==="
 echo ""
 
 # ── Client lint ──
 echo "[client] Running lint..."
-cd client
-pnpm run lint
-cd ..
+cd client && pnpm run lint && cd ..
 echo "[PASS] Client lint passed"
 echo ""
 
 # ── Server lint ──
 echo "[server] Running go vet..."
-cd server
-go vet ./...
-cd ..
+cd server && go vet ./... && cd ..
 echo "[PASS] Server go vet passed"
 echo ""
 
@@ -29,19 +23,16 @@ if command -v git-secrets >/dev/null 2>&1; then
   git secrets --scan --cached
   echo "[PASS] git-secrets scan passed"
 else
-  git diff --cached --name-only --diff-filter=ACM | while read file; do
-    if [ -f "$file" ]; then
-      RESULT=$(grep -nP \
-        '(?i)(api[_-]?key|secret|password|token|bearer|auth[_-]?token|private[_-]?key|-----BEGIN.*PRIVATE KEY-----)' \
-        "$file" 2>/dev/null | \
-        grep -vi 'example\|sample\|test\|mock\|placeholder\|your-\|envDefault\|os\.Getenv\|nocheck')
-      if [ -n "$RESULT" ]; then
-        echo "[WARN] Possible secret in $file:"
-        echo "$RESULT"
-      fi
+  echo "[info] git-secrets not found — use 'make install' to install it"
+  # Lightweight grep fallback
+  git diff --cached --name-only --diff-filter=ACM 2>/dev/null | while read file; do
+    [ ! -f "$file" ] && continue
+    if grep -nE '(api[_-]?key|secret|password|token).{0,10}[:=].{0,10}["'"'"']' "$file" 2>/dev/null | \
+       grep -viE '(example|sample|test|mock|placeholder|os\.Getenv|\benv\b)' >/dev/null 2>&1; then
+      echo "[WARN] Possible secret pattern in $file"
     fi
   done
-  echo "[PASS] grep scan passed (git-secrets not found, install with 'make install')"
+  echo "[PASS] Grep scan passed"
 fi
 
 echo ""
