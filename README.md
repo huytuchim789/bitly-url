@@ -41,13 +41,14 @@ Production-ready URL shortener with Go backend, Next.js frontend, Redis caching,
 
 | Layer | Technology |
 |-------|-----------|
-| **Backend** | Go 1.25, Gin, pgxpool (pgx v5), go-redis/v9, Prometheus client_golang, swaggo, caarlos0/env, slog (stdlib) |
+| **Backend** | Go 1.26, Gin, pgxpool (pgx v5), go-redis/v9, Prometheus client_golang, swaggo, caarlos0/env, slog (stdlib) |
 | **Frontend** | Next.js 15, React 19, TanStack Query, shadcn/ui, Tailwind CSS, ESLint (flat config), Prettier |
 | **Infra** | Docker Compose (Postgres 16 + Redis 7 + server + client + Nginx + Prometheus), Husky hooks, GitHub Actions (CI + Security) |
 
 ## Prerequisites
 
-- Go 1.25+
+- Go 1.26+ (see `.go-version`)
+- Node.js 26+ (see `.node-version`)
 - pnpm
 - Docker + Docker Compose
 - Make
@@ -233,6 +234,8 @@ Response:
 │       ├── .env.local          # Local dev env template
 │       └── .env.prod           # Production env template
 │
+├── .go-version               # Go version pin
+├── .node-version             # Node.js version pin
 ├── .github/workflows/
 │   ├── ci.yml                  # CI: lint + build + test
 │   └── security.yml            # Security: gitleaks + trivy + checkov
