@@ -1,161 +1,276 @@
 # bitly-url
 
-URL shortener built with Go (Gin) + Next.js + PostgreSQL.
+Production-ready URL shortener with Go backend, Next.js frontend, Redis caching, click analytics, and Prometheus observability.
+
+## Architecture
+
+```
+┌─────────┐    ┌──────────────┐
+│ Browser │───▶│  Nginx (:80) │
+└─────────┘    └──────┬───────┘
+                      │
+              ┌───────┴────────┐
+              ▼                ▼
+      ┌──────────────┐  ┌──────────────┐
+      │  Client (:3000)│  │  Server (:8080)│
+      │  Next.js      │  │  Gin + pgx    │
+      └──────────────┘  └───────┬───────┘
+                                │
+                    ┌───────────┴───────────┐
+                    ▼                       ▼
+            ┌──────────────┐       ┌──────────────┐
+            │  Redis (:6379)│       │  Postgres    │
+            │  Cache +     │       │  (:5432)     │
+            │  Rate Limit  │       │  urls +      │
+            │              │       │  clicks      │
+            └──────────────┘       └──────┬───────┘
+                                          │
+                                    ┌─────▼─────┐
+                                    │ Prometheus │
+                                    │  (:9090)   │
+                                    └───────────┘
+```
+
+- **Nginx** routes `/api/*` and `/:short` (6-char codes) → server, everything else → client
+- **Redis** caches shortened URLs (TTL 1h) and stores rate-limiter counters
+- **Postgres** stores URLs and click events; migrations auto-run on first startup
+- **Click tracking** uses an async batch worker (5s ticker / 100 events) — never blocks redirects
+- **Prometheus** scrapes `/metrics` from server for observability
 
 ## Tech Stack
 
-**Backend** — Gin, pgx, sqlc, Atlas, swaggo, air (hot reload)
-**Frontend** — Next.js 15, React 19, TanStack Query, Zustand, shadcn/ui, Tailwind CSS
-**Infra** — Docker Compose (Postgres 16 + server + client)
+| Layer | Technology |
+|-------|-----------|
+| **Backend** | Go 1.25, Gin, pgxpool (pgx v5), go-redis/v9, Prometheus client_golang, swaggo, caarlos0/env, slog (stdlib) |
+| **Frontend** | Next.js 15, React 19, TanStack Query, shadcn/ui, Tailwind CSS, ESLint (flat config), Prettier |
+| **Infra** | Docker Compose (Postgres 16 + Redis 7 + server + client + Nginx + Prometheus), Husky hooks, GitHub Actions (CI + Security) |
 
-## Quick Start (Docker)
-
-```bash
-docker compose up --build
-```
-
-- Client: http://localhost:3000
-- Server: http://localhost:8080
-- Swagger: http://localhost:8080/swagger/index.html
-
-## One-Click Setup
-
-```bash
-make install
-```
-
-This installs everything: Go deps, pnpm deps, CLI tools (swag, sqlc, air), git hooks (Husky), and git-secrets. Then runs `swag init` + `sqlc generate`.
-
-## Local Development
-
-### Prerequisites
+## Prerequisites
 
 - Go 1.25+
-- Node.js 20+ with pnpm
-- PostgreSQL 16 (Docker recommended)
+- pnpm
+- Docker + Docker Compose
 - Make
 
-### 1. Setup
+## Quick Start
+
+### Local Development (hàng ngày)
 
 ```bash
-# Install everything (recommended)
+# Terminal 1: Start infra (db, redis, prometheus) + backend
+make dev
+
+# Terminal 2: Start frontend
+cd client && pnpm dev
+```
+
+Backend at `http://localhost:8080` — Frontend at `http://localhost:3000`
+
+### Hoặc step-by-step
+
+```bash
+# 1. Cài dependencies (chỉ lần đầu)
 make install
 
-# Or manually:
-# - Install tools
-go install github.com/swaggo/swag/cmd/swag@latest
-go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-go install github.com/air-verse/air@latest
+# 2. Start infra (db + redis + prometheus)
+docker compose -f docker/compose/compose.local.yaml up -d
 
-# - Backend deps
-cd server && go mod tidy
+# 3. Migration (auto-run, manual nếu cần)
+docker exec -i bitly-url-db-1 psql -U postgres -d bitly < server/db/migrations/001_init.sql
 
-# - Frontend deps
-cd client && pnpm install
+# 4. Backend
+cd server && go run ./cmd/main.go
 
-# - Git hooks
-git config core.hooksPath .husky
-
-# - Generate code
-cd server && swag init -g cmd/main.go && sqlc generate
+# 5. Frontend
+cd client && pnpm dev
 ```
 
-### 2. Database
+### Production (Docker full stack)
 
 ```bash
-# Start Postgres via Docker
-docker run -d --name bitly-db \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=bitly \
-  -p 5432:5432 \
-  postgres:16-alpine
+# 1. Build Docker images
+make build
 
-# Run migration
-docker exec -i bitly-db psql -U postgres -d bitly < server/db/migrations/001_create_urls.sql
+# 2. Start full stack (db + redis + server + client + nginx + prometheus)
+docker compose -f docker/compose/compose.prod.yaml up -d
 ```
 
-### 3. Backend
+Access via `http://localhost` (Nginx single entry point).
 
-```bash
-cd server
+## Service Access
 
-# Download dependencies
-go mod tidy
+| URL | Service | Môi trường |
+|-----|---------|-----------|
+| `http://localhost` | Nginx reverse proxy | prod |
+| `http://localhost:3000` | Next.js client (direct) | local |
+| `http://localhost:8080` | Go server (direct) | local |
+| `http://localhost:8080/swagger/index.html` | Swagger API docs | local + prod |
+| `http://localhost:8080/metrics` | Prometheus metrics endpoint | local + prod |
+| `http://localhost:9090` | Prometheus UI | local + prod |
+| `http://localhost:5432` | Postgres | internal |
+| `http://localhost:6379` | Redis | internal |
 
-# Generate OpenAPI docs (first time)
-go install github.com/swaggo/swag/cmd/swag@latest
-swag init -g cmd/main.go
+## Makefile Commands
 
-# Generate sqlc code (first time)
-go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-sqlc generate
+| Lệnh | Mô tả |
+|------|-------|
+| `make install` | Install deps + tools + hooks + generate swagger |
+| `make dev` | Start infra (db + redis + prometheus) + backend (`go run`) |
+| `make dev-client` | Start frontend (`pnpm dev`) |
+| `make dc-up-local` | Start infra only (db, redis, prometheus) |
+| `make dc-down-local` | Stop infra |
+| `make build` | Build Docker images (server + client) |
+| `make dc-up-prod` | Start full production stack (db → redis → server → client → nginx → prometheus) |
+| `make dc-down-prod` | Stop production stack |
+| `make build-local-server` | Build Go binary locally |
+| `make build-local-client` | Build Next.js locally |
+| `make swag` | Regenerate Swagger docs |
+| `make lint` | Run linters (`go vet` + `eslint`) |
+| `make clean` | Clean build artifacts |
+| `make help` | Show all commands |
 
-# Run server
-go run ./cmd/main.go
-```
+## Docker Compose Files
 
-Server starts on `:8080`.
-
-### 3. Frontend
-
-```bash
-cd client
-pnpm install
-pnpm run dev
-```
-
-Client starts on `:3000`.
+| File | Mục đích |
+|------|----------|
+| `docker/compose/compose.local.yaml` | Local dev — chỉ db, redis, prometheus. Server/client chạy trực tiếp bằng `go run` / `pnpm dev` |
+| `docker/compose/compose.prod.yaml` | Production — full stack gồm server + client + nginx. Cần build image trước bằng `make build` |
 
 ## Environment Variables
 
 ### Server
 
-| Variable       | Default                                                         |
-|----------------|-----------------------------------------------------------------|
-| `PORT`         | `8080`                                                          |
-| `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/bitly?sslmode=disable` |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | Server listen port |
+| `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/bitly?sslmode=disable` | Postgres connection string |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
+| `ENVIRONMENT` | `development` | Runtime environment (development/production) |
+| `LOG_LEVEL` | `info` | Log level (debug/info/warn/error) |
 
 ### Client
 
-| Variable               | Default                        |
-|------------------------|--------------------------------|
-| `NEXT_PUBLIC_API_URL`  | `http://localhost:8080`         |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NEXT_PUBLIC_API_URL` | (empty) | API base URL. Empty = relative requests (works through Nginx). Set to `http://localhost:8080` for direct access. |
+
+## API Endpoints
+
+| Method | Path | Rate Limit | Description |
+|--------|------|------------|-------------|
+| `POST` | `/api/shorten` | 10/min | Create a short URL |
+| `GET` | `/api/urls` | 100/min | List all URLs (limit/offset pagination) |
+| `GET` | `/api/urls/:short` | 100/min | Get original URL by short code |
+| `GET` | `/:short` | 100/min | Redirect to original URL (302 Found) |
+| `GET` | `/healthz` | — | Liveness check |
+| `GET` | `/readyz` | — | Readiness check (DB + Redis ping) |
+| `GET` | `/metrics` | — | Prometheus metrics |
+| `GET` | `/debug/pprof/*` | — | Go pprof profiling |
+
+### Shorten a URL
+
+```bash
+curl -X POST http://localhost:8080/api/shorten \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/very/long/url"}'
+```
+
+Response:
+
+```json
+{
+  "id": "3e7b1c2a-8f5d-4b9a-8c1d-2e3f4a5b6c7d",
+  "short": "aB3xY9",
+  "original": "https://example.com/very/long/url",
+  "clicks": 0,
+  "created_at": "2026-06-20T12:00:00Z",
+  "updated_at": "2026-06-20T12:00:00Z"
+}
+```
 
 ## Project Structure
 
 ```
-├── docker-compose.yml
-├── .gitignore
-├── .husky/                     # Git hooks
-├── .github/workflows/          # CI + Security
-├── Makefile                    # Root commands
-├── client/
+├── server/                     # Go source code
+│   ├── cmd/main.go
+│   ├── internal/
+│   │   ├── config/             # Env config (caarlos0/env)
+│   │   ├── entity/             # URL, Click structs
+│   │   ├── cache/              # Redis cache interface + impl
+│   │   ├── repository/         # Interfaces + Postgres impl
+│   │   ├── usecase/            # Business logic (+ tests)
+│   │   ├── handler/            # Gin handlers (+ tests)
+│   │   ├── middleware/         # RequestID, Logger, CORS, Error, Metrics, RateLimit
+│   │   ├── metrics/            # Prometheus metric definitions
+│   │   ├── pkg/errors/         # Typed AppError
+│   │   ├── database/           # pgxpool setup
+│   │   └── router/             # Routes + Swagger
+│   ├── db/migrations/          # SQL migrations
+│   └── go.mod
+│
+├── client/                     # Next.js source code
 │   ├── src/
+│   │   ├── pages/              # Next.js pages
 │   │   ├── app/                # App providers, layout
-│   │   ├── pages/              # Next.js pages (routing)
 │   │   ├── widgets/            # Composed UI widgets
 │   │   ├── features/           # Feature slices
-│   │   ├── entities/           # Domain entities + API + hooks
-│   │   └── shared/             # UI kit, lib, types
-│   ├── Dockerfile
+│   │   ├── entities/           # Domain entities + TanStack Query hooks
+│   │   └── shared/             # UI kit (shadcn/ui), API client, types
 │   └── package.json
-└── server/
-    ├── cmd/main.go              # Entry point
-    ├── internal/
-    │   ├── config/              # Env config (caarlos0/env)
-    │   ├── middleware/          # Gin middleware (Logger, RequestID, CORS, Error)
-    │   ├── pkg/errors/          # Typed errors (AppError)
-    │   ├── handler/             # Gin handlers
-    │   ├── repository/         # Data access (sqlc)
-    │   ├── router/             # Gin routes + Swagger
-    │   └── usecase/            # Business logic
-    ├── db/
-    │   ├── migrations/         # Atlas SQL migrations
-    │   └── queries/            # sqlc named queries
-    ├── sqlc.yaml
-    ├── atlas.hcl
-    ├── .air.toml
-    ├── Dockerfile
-    └── go.mod
+│
+├── docker/
+│   ├── server/Dockerfile       # Server image (multi-stage Go build)
+│   ├── client/Dockerfile       # Client image (multi-stage Next.js build)
+│   ├── nginx/
+│   │   ├── Dockerfile
+│   │   └── default.conf        # Nginx config (reverse proxy)
+│   ├── compose/
+│   │   ├── compose.local.yaml  # Local dev: db + redis + prometheus
+│   │   └── compose.prod.yaml   # Production: full stack
+│   ├── prometheus/
+│   │   └── prometheus.yml       # Prometheus scrape config
+│   └── env/
+│       ├── .env.local          # Local dev env template
+│       └── .env.prod           # Production env template
+│
+├── .github/workflows/
+│   ├── ci.yml                  # CI: lint + build + test
+│   └── security.yml            # Security: gitleaks + trivy + checkov
+├── .husky/                     # Git hooks
+├── Makefile
+└── README.md
 ```
+
+## Docker Compose Services
+
+### Local (`compose.local.yaml`)
+
+| Service | Image | Ports | Health Check |
+|---------|-------|-------|-------------|
+| `db` | postgres:16-alpine | 5432 | pg_isready |
+| `redis` | redis:7-alpine | 6379 | redis-cli ping |
+| `prometheus` | prom/prometheus | 9090 | — |
+
+### Production (`compose.prod.yaml`)
+
+| Service | Image / Build | Ports | Depends On |
+|---------|--------------|-------|------------|
+| `db` | postgres:16-alpine | — | — |
+| `redis` | redis:7-alpine | — | — |
+| `server` | bitly-url-server (pre-built) | — | db, redis |
+| `client` | bitly-url-client (pre-built) | — | server |
+| `nginx` | Dockerfile (docker/nginx/) | 80 | server, client |
+| `prometheus` | prom/prometheus | 9090 | — |
+
+## Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **302 redirect** | Prevents browser caching; allows updating target URL later |
+| **Redis cache-first** | Cache hit → immediate redirect; cache miss → query DB + populate cache |
+| **Async click tracking** | Batch worker (5s / 100 events) never blocks the redirect response |
+| **Rate limiting** | Redis sliding window per-IP per-endpoint; separate limits for POST/GET |
+| **Open redirect protection** | Blocks private IPs, loopback, and localhost destinations |
+| **Short code** | 6-char alphanumeric (`crypto/rand`), collision detection with retry (10 attempts) |
+| **UUID primary key** | Separate `id` (UUID) from `short` (user-facing code); clean FK for click tracking |
+| **No authentication** | Public shortening — simplifies architecture |
