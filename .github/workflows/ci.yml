@@ -8,7 +8,7 @@ on:
 
 env:
   GO_VERSION: "1.25"
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
 
 jobs:
   client-lint:
@@ -86,3 +86,19 @@ jobs:
           cache-dependency-path: server/go.sum
 
       - run: go build -o /dev/null ./cmd/main.go
+
+  server-test:
+    name: Server Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: server/go.sum
+
+      - run: go test ./... -count=1 -timeout 120s
