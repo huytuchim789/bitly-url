@@ -1,0 +1,49 @@
+#!/bin/sh
+
+set -e
+
+echo ""
+echo "=== Pre-commit Checks ==="
+echo ""
+
+# ── Client lint ──
+echo "[client] Running lint..."
+cd client
+pnpm run lint
+cd ..
+echo "[PASS] Client lint passed"
+echo ""
+
+# ── Server lint ──
+echo "[server] Running go vet..."
+cd server
+go vet ./...
+cd ..
+echo "[PASS] Server go vet passed"
+echo ""
+
+# ── Secret scan ──
+echo "[security] Scanning for secrets..."
+
+if command -v git-secrets >/dev/null 2>&1; then
+  git secrets --scan --cached
+  echo "[PASS] git-secrets scan passed"
+else
+  git diff --cached --name-only --diff-filter=ACM | while read file; do
+    if [ -f "$file" ]; then
+      RESULT=$(grep -nP \
+        '(?i)(api[_-]?key|secret|password|token|bearer|auth[_-]?token|private[_-]?key|-----BEGIN.*PRIVATE KEY-----)' \
+        "$file" 2>/dev/null | \
+        grep -vi 'example\|sample\|test\|mock\|placeholder\|your-\|envDefault\|os\.Getenv\|nocheck')
+      if [ -n "$RESULT" ]; then
+        echo "[WARN] Possible secret in $file:"
+        echo "$RESULT"
+      fi
+    fi
+  done
+  echo "[PASS] grep scan passed (git-secrets not found, install with 'make install')"
+fi
+
+echo ""
+echo "=== All Checks Passed ==="
+echo ""

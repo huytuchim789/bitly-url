@@ -1,0 +1,66 @@
+#!/bin/sh
+
+set -e
+
+echo ""
+echo "=== Pre-push Security Scan ==="
+echo ""
+
+if command -v git-secrets >/dev/null 2>&1; then
+  echo "[security] Running git-secrets on all commits..."
+  git secrets --scan-history
+  echo "[PASS] git-secrets scan passed"
+else
+  echo "[security] git-secrets not found — running grep fallback..."
+  echo ""
+
+  scan_file() {
+    file="$1"
+    basename=$(basename "$file")
+
+    case "$basename" in
+      pnpm-lock.yaml|package-lock.json|go.sum|*.png|*.jpg|*.ico|*.svg|*.lock|sum.golden)
+        return 0 ;;
+    esac
+
+    [ ! -f "$file" ] && return 0
+
+    PATTERNS='(?i)api[_-]?key\s*[:=]\s*["'\''"][A-Za-z0-9_\-]{16,}|(?i)secret\s*[:=]\s*["'\''"][A-Za-z0-9_\-]{16,}|(?i)password\s*[:=]\s*["'\''"][A-Za-z0-9_\-]{8,}|(?i)token\s*[:=]\s*["'\''"][A-Za-z0-9_\-]{16,}|(?i)bearer\s+[A-Za-z0-9_\-]{20,}|-----BEGIN (RSA|EC|DSA|OPENSSH|PRIVATE) KEY-----|ghp_[A-Za-z0-9_]{36}|gho_[A-Za-z0-9_]{36}|ghu_[A-Za-z0-9_]{36}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{32,}'
+
+    MATCH=$(grep -Pn "$PATTERNS" "$file" 2>/dev/null | grep -vi 'example\|sample\|test\|mock\|placeholder\|your-\|envDefault\|os\.Getenv\|nocheck')
+    if [ -n "$MATCH" ]; then
+      echo "--------------------------------------------------"
+      echo "[BLOCKED] Secret pattern detected in: $file"
+      echo "$MATCH"
+      echo "--------------------------------------------------"
+      return 1
+    fi
+    return 0
+  }
+
+  git fetch origin 2>/dev/null || true
+
+  CHANGED_FILES=$(git diff --name-only HEAD $(git merge-base HEAD origin/main 2>/dev/null || echo HEAD~1) 2>/dev/null)
+  if [ -z "$CHANGED_FILES" ]; then
+    CHANGED_FILES=$(git diff --name-only HEAD~1 2>/dev/null)
+  fi
+
+  HAS_SECRET=0
+  echo "$CHANGED_FILES" | while read file; do
+    [ -n "$file" ] && scan_file "$file" || HAS_SECRET=$?
+  done
+
+  if [ $HAS_SECRET -ne 0 ]; then
+    echo ""
+    echo "[FAIL] Secrets found in code. Push blocked."
+    echo "Remove secrets and try again, or use 'git push --no-verify' to bypass."
+    echo "Install git-secrets: 'make install'"
+    exit 1
+  fi
+
+  echo "[PASS] No secrets detected"
+fi
+
+echo ""
+echo "=== Push Allowed ==="
+echo ""
