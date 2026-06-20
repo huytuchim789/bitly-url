@@ -1,0 +1,42 @@
+# Dependencies
+client/node_modules/
+server/vendor/
+
+# Build output
+client/.next/
+client/out/
+server/bin/
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Generated code
+server/internal/dbgen/
+
+# Swagger docs (auto-generated)
+server/docs/
+
+# Go
+server/tmp/
+
+# Docker
+docker-data/
+
+# Husky internal
+.husky/_
