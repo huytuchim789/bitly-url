@@ -93,9 +93,7 @@ func (uc *URLUseCase) FindByShort(ctx context.Context, short string) (*entity.UR
 		if err := uc.validateRedirectTarget(cached); err != nil {
 			return nil, err
 		}
-		uc.cacheIncr(ctx, cacheKey+":clicks")
-
-		return &entity.URL{
+			return &entity.URL{
 			Short:    short,
 			Original: cached,
 		}, nil
@@ -305,13 +303,6 @@ func (uc *URLUseCase) cacheSet(ctx context.Context, key, value string, ttl time.
 		return
 	}
 	uc.cache.Set(ctx, key, value, ttl)
-}
-
-func (uc *URLUseCase) cacheIncr(ctx context.Context, key string) {
-	if uc.cache == nil {
-		return
-	}
-	uc.cache.Incr(ctx, key)
 }
 
 func generateShortCode() (string, error) {

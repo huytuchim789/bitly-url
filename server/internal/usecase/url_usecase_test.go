@@ -162,8 +162,6 @@ func TestFindByShort_CacheHit_Success(t *testing.T) {
 	uc := NewURLUseCase(repo, clickRepo, cache, context.Background())
 
 	cache.On("Get", mock.Anything, "short:abc123").Return("https://example.com", nil)
-	cache.On("Incr", mock.Anything, "short:abc123:clicks").Return(int64(1), nil)
-
 	url, err := uc.FindByShort(context.Background(), "abc123")
 
 	assert.NoError(t, err)
