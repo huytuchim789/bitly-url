@@ -55,7 +55,7 @@ Production-ready URL shortener with Go backend, Next.js frontend, Redis caching,
 
 ## Quick Start
 
-### Local Development (hàng ngày)
+### Local Development (daily)
 
 ```bash
 # Terminal 1: Start infra (db, redis, prometheus) + backend
@@ -67,16 +67,16 @@ cd client && pnpm dev
 
 Backend at `http://localhost:8080` — Frontend at `http://localhost:3000`
 
-### Hoặc step-by-step
+### Or step-by-step
 
 ```bash
-# 1. Cài dependencies (chỉ lần đầu)
+# 1. Install dependencies (first time only)
 make install
 
 # 2. Start infra (db + redis + prometheus)
 docker compose -f docker/compose/compose.local.yaml up -d
 
-# 3. Migration (auto-run, manual nếu cần)
+# 3. Migration (auto-run, manual if needed)
 docker exec -i bitly-url-db-1 psql -U postgres -d bitly < server/db/migrations/001_init.sql
 
 # 4. Backend
@@ -100,7 +100,7 @@ Access via `http://localhost` (Nginx single entry point).
 
 ## Service Access
 
-| URL | Service | Môi trường |
+| URL | Service | Environment |
 |-----|---------|-----------|
 | `http://localhost` | Nginx reverse proxy | prod |
 | `http://localhost:3000` | Next.js client (direct) | local |
@@ -113,7 +113,7 @@ Access via `http://localhost` (Nginx single entry point).
 
 ## Makefile Commands
 
-| Lệnh | Mô tả |
+| Command | Description |
 |------|-------|
 | `make install` | Install deps + tools + hooks + generate swagger |
 | `make dev` | Start infra (db + redis + prometheus) + backend (`go run`) |
@@ -132,10 +132,10 @@ Access via `http://localhost` (Nginx single entry point).
 
 ## Docker Compose Files
 
-| File | Mục đích |
+| File | Purpose |
 |------|----------|
-| `docker/compose/compose.local.yaml` | Local dev — chỉ db, redis, prometheus. Server/client chạy trực tiếp bằng `go run` / `pnpm dev` |
-| `docker/compose/compose.prod.yaml` | Production — full stack gồm server + client + nginx. Cần build image trước bằng `make build` |
+| `docker/compose/compose.local.yaml` | Local dev — db, redis, prometheus only. Server/client run directly via `go run` / `pnpm dev` |
+| `docker/compose/compose.prod.yaml` | Production — full stack with server + client + nginx. Build images first with `make build` |
 
 ## Environment Variables
 
@@ -234,8 +234,8 @@ Response:
 │       ├── .env.local          # Local dev env template
 │       └── .env.prod           # Production env template
 │
-├── .go-version               # Go version pin
-├── .node-version             # Node.js version pin
+├── server/.go-version        # Go version pin
+├── client/.node-version      # Node.js version pin
 ├── .github/workflows/
 │   ├── ci.yml                  # CI: lint + build + test
 │   └── security.yml            # Security: gitleaks + trivy + checkov
