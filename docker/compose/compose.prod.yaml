@@ -30,12 +30,15 @@ services:
       PORT: "8080"
       DATABASE_URL: "postgres://postgres:postgres@db:5432/bitly?sslmode=disable"
       REDIS_URL: "redis://redis:6379/0"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
       GIN_MODE: release
       ENVIRONMENT: production
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   client:
@@ -54,6 +57,14 @@ services:
     depends_on:
       - server
       - client
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:latest

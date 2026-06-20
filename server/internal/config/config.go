@@ -5,8 +5,9 @@ import "github.com/caarlos0/env/v11"
 type Config struct {
 	Port        string `env:"PORT" envDefault:"8080"`
 	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://postgres:postgres@localhost:5432/bitly?sslmode=disable"`
-	RedisURL    string `env:"REDIS_URL" envDefault:"redis://localhost:6379/0"`
-	LogLevel    string `env:"LOG_LEVEL" envDefault:"info"`
+	RedisURL     string `env:"REDIS_URL" envDefault:"redis://localhost:6379/0"`
+	RabbitMQURL  string `env:"RABBITMQ_URL" envDefault:"amqp://guest:guest@localhost:5672/"`
+	LogLevel     string `env:"LOG_LEVEL" envDefault:"info"`
 	Environment string `env:"ENVIRONMENT" envDefault:"development"`
 }
 

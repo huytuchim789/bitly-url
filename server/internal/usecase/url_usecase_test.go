@@ -20,6 +20,23 @@ func (m *mockClickRepo) BatchInsert(ctx context.Context, clicks []*entity.Click)
 	return m.Called(ctx, clicks).Error(0)
 }
 
+type mockClickQueue struct {
+	mock.Mock
+}
+
+func (m *mockClickQueue) Publish(ctx context.Context, click *entity.Click) error {
+	return m.Called(ctx, click).Error(0)
+}
+
+func (m *mockClickQueue) Consume(ctx context.Context) (<-chan *entity.Click, error) {
+	args := m.Called(ctx)
+	return args.Get(0).(<-chan *entity.Click), args.Error(1)
+}
+
+func (m *mockClickQueue) Close() error {
+	return m.Called().Error(0)
+}
+
 type mockCache struct {
 	mock.Mock
 }
@@ -95,7 +112,7 @@ func TestShorten_ValidURL_Success(t *testing.T) {
 	repo := new(mockRepo)
 	cache := new(mockCache)
 	clickRepo := new(mockClickRepo)
-	uc := NewURLUseCase(repo, clickRepo, cache, context.Background())
+	uc := NewURLUseCase(repo, clickRepo, cache, nil, context.Background())
 
 	cache.On("Get", mock.Anything, mock.Anything).Return("", assert.AnError)
 	repo.On("FindByShort", mock.Anything, mock.Anything).Return(nil, assert.AnError)
@@ -116,7 +133,7 @@ func TestShorten_InvalidURL_TooLong(t *testing.T) {
 	repo := new(mockRepo)
 	cache := new(mockCache)
 	clickRepo := new(mockClickRepo)
-	uc := NewURLUseCase(repo, clickRepo, cache, context.Background())
+	uc := NewURLUseCase(repo, clickRepo, cache, nil, context.Background())
 
 	longURL := "https://example.com/" + string(make([]byte, 2048))
 
@@ -129,7 +146,7 @@ func TestShorten_InvalidURL_BadScheme(t *testing.T) {
 	repo := new(mockRepo)
 	cache := new(mockCache)
 	clickRepo := new(mockClickRepo)
-	uc := NewURLUseCase(repo, clickRepo, cache, context.Background())
+	uc := NewURLUseCase(repo, clickRepo, cache, nil, context.Background())
 
 	url, err := uc.Shorten(context.Background(), "ftp://example.com")
 	assert.Error(t, err)
@@ -140,7 +157,7 @@ func TestShorten_PrivateIP_Blocked(t *testing.T) {
 	repo := new(mockRepo)
 	cache := new(mockCache)
 	clickRepo := new(mockClickRepo)
-	uc := NewURLUseCase(repo, clickRepo, cache, context.Background())
+	uc := NewURLUseCase(repo, clickRepo, cache, nil, context.Background())
 
 	url, err := uc.Shorten(context.Background(), "http://localhost:8080/evil")
 	assert.Error(t, err)
@@ -159,7 +176,7 @@ func TestFindByShort_CacheHit_Success(t *testing.T) {
 	repo := new(mockRepo)
 	cache := new(mockCache)
 	clickRepo := new(mockClickRepo)
-	uc := NewURLUseCase(repo, clickRepo, cache, context.Background())
+	uc := NewURLUseCase(repo, clickRepo, cache, nil, context.Background())
 
 	cache.On("Get", mock.Anything, "short:abc123").Return("https://example.com", nil)
 	url, err := uc.FindByShort(context.Background(), "abc123")
@@ -174,7 +191,7 @@ func TestFindByShort_CacheMiss_DBHit_Success(t *testing.T) {
 	repo := new(mockRepo)
 	cache := new(mockCache)
 	clickRepo := new(mockClickRepo)
-	uc := NewURLUseCase(repo, clickRepo, cache, context.Background())
+	uc := NewURLUseCase(repo, clickRepo, cache, nil, context.Background())
 
 	now := time.Now()
 	existingURL := &entity.URL{
@@ -202,7 +219,7 @@ func TestFindByShort_NotFound(t *testing.T) {
 	repo := new(mockRepo)
 	cache := new(mockCache)
 	clickRepo := new(mockClickRepo)
-	uc := NewURLUseCase(repo, clickRepo, cache, context.Background())
+	uc := NewURLUseCase(repo, clickRepo, cache, nil, context.Background())
 
 	cache.On("Get", mock.Anything, "short:nonexist").Return("", assert.AnError)
 	repo.On("FindByShort", mock.Anything, "nonexist").Return(nil, assert.AnError)
@@ -217,7 +234,7 @@ func TestFindByShort_Expired(t *testing.T) {
 	repo := new(mockRepo)
 	cache := new(mockCache)
 	clickRepo := new(mockClickRepo)
-	uc := NewURLUseCase(repo, clickRepo, cache, context.Background())
+	uc := NewURLUseCase(repo, clickRepo, cache, nil, context.Background())
 
 	expiresAt := time.Now().Add(-1 * time.Hour)
 	expiredURL := &entity.URL{
@@ -240,7 +257,7 @@ func TestFindAll_DefaultLimit(t *testing.T) {
 	repo := new(mockRepo)
 	cache := new(mockCache)
 	clickRepo := new(mockClickRepo)
-	uc := NewURLUseCase(repo, clickRepo, cache, context.Background())
+	uc := NewURLUseCase(repo, clickRepo, cache, nil, context.Background())
 
 	repo.On("FindAll", mock.Anything, 50, 0).Return([]*entity.URL{}, nil)
 
@@ -254,7 +271,7 @@ func TestFindAll_ExceedsMaxLimit(t *testing.T) {
 	repo := new(mockRepo)
 	cache := new(mockCache)
 	clickRepo := new(mockClickRepo)
-	uc := NewURLUseCase(repo, clickRepo, cache, context.Background())
+	uc := NewURLUseCase(repo, clickRepo, cache, nil, context.Background())
 
 	repo.On("FindAll", mock.Anything, 50, 0).Return([]*entity.URL{}, nil)
 

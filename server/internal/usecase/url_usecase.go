@@ -15,6 +15,7 @@ import (
 	"bitly-url/internal/entity"
 	"bitly-url/internal/metrics"
 	apperrors "bitly-url/internal/pkg/errors"
+	"bitly-url/internal/queue"
 	"bitly-url/internal/repository"
 
 	"github.com/google/uuid"
@@ -32,22 +33,24 @@ type URLUseCase struct {
 	repo      repository.URLRepository
 	clickRepo repository.ClickRepository
 	cache     cache.Cache
+	queue     queue.ClickQueue
 	ctx       context.Context
 	cancel    context.CancelFunc
-	clickQueue chan *entity.Click
 }
 
-func NewURLUseCase(repo repository.URLRepository, clickRepo repository.ClickRepository, c cache.Cache, ctx context.Context) *URLUseCase {
+func NewURLUseCase(repo repository.URLRepository, clickRepo repository.ClickRepository, c cache.Cache, q queue.ClickQueue, ctx context.Context) *URLUseCase {
 	ctx, cancel := context.WithCancel(ctx)
 	uc := &URLUseCase{
-		repo:       repo,
-		clickRepo:  clickRepo,
-		cache:      c,
-		ctx:        ctx,
-		cancel:     cancel,
-		clickQueue: make(chan *entity.Click, 10000),
+		repo:      repo,
+		clickRepo: clickRepo,
+		cache:     c,
+		queue:     q,
+		ctx:       ctx,
+		cancel:    cancel,
 	}
-	go uc.clickWorker()
+	if q != nil {
+		go uc.clickWorker()
+	}
 	return uc
 }
 
@@ -119,13 +122,19 @@ func (uc *URLUseCase) FindByShort(ctx context.Context, short string) (*entity.UR
 }
 
 func (uc *URLUseCase) TrackClick(shortID uuid.UUID, ip, userAgent, referer string) {
-	uc.clickQueue <- &entity.Click{
+	if uc.queue == nil {
+		return
+	}
+	click := &entity.Click{
 		ID:        uuid.New(),
 		ShortID:   shortID,
 		IP:        ip,
 		UserAgent: userAgent,
 		Referer:   referer,
 		Timestamp: time.Now(),
+	}
+	if err := uc.queue.Publish(uc.ctx, click); err != nil {
+		slog.Error("failed to publish click", "error", err)
 	}
 }
 
@@ -150,6 +159,12 @@ func (uc *URLUseCase) Delete(ctx context.Context, id string) error {
 }
 
 func (uc *URLUseCase) clickWorker() {
+	clickCh, err := uc.queue.Consume(uc.ctx)
+	if err != nil {
+		slog.Error("failed to start click consumer", "error", err)
+		return
+	}
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -157,7 +172,10 @@ func (uc *URLUseCase) clickWorker() {
 
 	for {
 		select {
-		case click := <-uc.clickQueue:
+		case click, ok := <-clickCh:
+			if !ok {
+				return
+			}
 			buf = append(buf, click)
 			if len(buf) >= 100 {
 				uc.flushClicks(buf)

@@ -13,6 +13,7 @@ import (
 	"bitly-url/internal/config"
 	"bitly-url/internal/database"
 	"bitly-url/internal/handler"
+	"bitly-url/internal/queue"
 	"bitly-url/internal/repository/postgres"
 	"bitly-url/internal/router"
 	"bitly-url/internal/usecase"
@@ -51,10 +52,19 @@ func main() {
 	urlRepo := postgres.NewURLPostgresRepo(db)
 	clickRepo := postgres.NewClickPostgresRepo(db)
 
+	var q queue.ClickQueue
+	rmq, err := queue.New(cfg.RabbitMQURL)
+	if err != nil {
+		slog.Warn("rabbitmq not available, clicks disabled", "error", err)
+	} else {
+		q = rmq
+		defer rmq.Close()
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	uc := usecase.NewURLUseCase(urlRepo, clickRepo, c, ctx)
+	uc := usecase.NewURLUseCase(urlRepo, clickRepo, c, q, ctx)
 	h := handler.NewURLHandler(uc)
 	r := router.New(h, db, c)
 
