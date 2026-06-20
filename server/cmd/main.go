@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"bitly-url/internal/cache"
 	"bitly-url/internal/config"
 	"bitly-url/internal/database"
 	"bitly-url/internal/handler"
@@ -37,10 +38,23 @@ func main() {
 	}
 	defer db.Close()
 
-	repo := postgres.NewURLPostgresRepo(db)
-	uc := usecase.NewURLUseCase(repo)
+	var c cache.Cache
+	redisCache, err := cache.NewRedis(cfg.RedisURL)
+	if err != nil {
+		slog.Warn("redis not available, running without cache", "error", err)
+		c = nil
+	} else {
+		c = redisCache
+		defer redisCache.Close()
+	}
+
+	urlRepo := postgres.NewURLPostgresRepo(db)
+	clickRepo := postgres.NewClickPostgresRepo(db)
+	_ = clickRepo
+
+	uc := usecase.NewURLUseCase(urlRepo, c)
 	h := handler.NewURLHandler(uc)
-	r := router.New(h)
+	r := router.New(h, db, c)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -51,7 +65,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		slog.Info("server starting", "port", cfg.Port)
+		slog.Info("server starting", "port", cfg.Port, "env", cfg.Environment)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
 			os.Exit(1)
@@ -61,7 +75,7 @@ func main() {
 	<-ctx.Done()
 	slog.Info("shutting down...")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {

@@ -21,10 +21,22 @@ func ErrorHandler() gin.HandlerFunc {
 
 		if appErr, ok := err.(*errors.AppError); ok {
 			c.JSON(appErr.Code, gin.H{"error": appErr.Message})
+
+			if appErr.Code >= http.StatusInternalServerError {
+				slog.Error("server error",
+					"error", appErr.Message,
+					"request_id", c.GetString("request_id"),
+					"path", c.Request.URL.Path,
+				)
+			}
 			return
 		}
 
-		slog.Error("unhandled error", "error", err, "request_id", c.GetString("request_id"))
+		slog.Error("unhandled error",
+			"error", err,
+			"request_id", c.GetString("request_id"),
+			"path", c.Request.URL.Path,
+		)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 	}
 }

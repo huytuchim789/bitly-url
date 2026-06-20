@@ -1,24 +1,37 @@
 package handler
 
 import (
+	"context"
 	"net/http"
+	"strconv"
 
+	"bitly-url/internal/entity"
+	"bitly-url/internal/metrics"
 	"bitly-url/internal/pkg/errors"
-	"bitly-url/internal/usecase"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
-type URLHandler struct {
-	uc *usecase.URLUseCase
+type URLUseCase interface {
+	Shorten(ctx context.Context, original string) (*entity.URL, error)
+	FindByShort(ctx context.Context, short string) (*entity.URL, error)
+	FindAll(ctx context.Context, limit, offset int) ([]*entity.URL, error)
+	TrackClick(shortID uuid.UUID, ip, userAgent, referer string)
+	Delete(ctx context.Context, id string) error
 }
 
-func NewURLHandler(uc *usecase.URLUseCase) *URLHandler {
+type URLHandler struct {
+	uc URLUseCase
+}
+
+func NewURLHandler(uc URLUseCase) *URLHandler {
 	return &URLHandler{uc: uc}
 }
 
 type ShortenRequest struct {
-	URL string `json:"url" binding:"required,url"`
+	URL       string `json:"url" binding:"required,url"`
+	ExpiresIn string `json:"expires_in,omitempty"` // optional: "24h", "7d", "30d"
 }
 
 // Shorten    godoc
@@ -30,7 +43,7 @@ type ShortenRequest struct {
 // @Param        request body ShortenRequest true "URL to shorten"
 // @Success      201  {object}  entity.URL
 // @Failure      400  {object}  map[string]string
-// @Failure      500  {object}  map[string]string
+// @Failure      429  {object}  map[string]string
 // @Router       /api/shorten [post]
 func (h *URLHandler) Shorten(c *gin.Context) {
 	var req ShortenRequest
@@ -44,6 +57,7 @@ func (h *URLHandler) Shorten(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	metrics.URLShortenTotal.Inc()
 	c.JSON(http.StatusCreated, url)
 }
 
@@ -52,8 +66,9 @@ func (h *URLHandler) Shorten(c *gin.Context) {
 // @Description  Redirect to the original URL using the short code
 // @Tags         urls
 // @Param        short path string true "Short code"
-// @Success      301
+// @Success      302
 // @Failure      404  {object}  map[string]string
+// @Failure      410  {object}  map[string]string
 // @Router       /{short} [get]
 func (h *URLHandler) Redirect(c *gin.Context) {
 	short := c.Param("short")
@@ -62,6 +77,16 @@ func (h *URLHandler) Redirect(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+
+	if url.ID != uuid.Nil {
+		h.uc.TrackClick(
+			url.ID,
+			c.ClientIP(),
+			c.GetHeader("User-Agent"),
+			c.GetHeader("Referer"),
+		)
+	}
+
 	c.Redirect(http.StatusFound, url.Original)
 }
 
@@ -86,14 +111,19 @@ func (h *URLHandler) GetByShort(c *gin.Context) {
 
 // List       godoc
 // @Summary      List all URLs
-// @Description  Get all shortened URLs
+// @Description  Get all shortened URLs with pagination
 // @Tags         urls
 // @Produce      json
+// @Param        limit query int false "Limit (default 50)"
+// @Param        offset query int false "Offset (default 0)"
 // @Success      200  {array}   entity.URL
 // @Failure      500  {object}  map[string]string
 // @Router       /api/urls [get]
 func (h *URLHandler) List(c *gin.Context) {
-	urls, err := h.uc.FindAll(c.Request.Context())
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	urls, err := h.uc.FindAll(c.Request.Context(), limit, offset)
 	if err != nil {
 		c.Error(err)
 		return
