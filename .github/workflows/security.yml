@@ -1,0 +1,88 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  git-secrets:
+    name: Git Secrets Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install git-secrets
+        run: |
+          git clone https://github.com/awslabs/git-secrets.git /tmp/git-secrets
+          cd /tmp/git-secrets && sudo make install
+          cd "$GITHUB_WORKSPACE"
+          git secrets --register-aws
+          git secrets --add 'sk-[A-Za-z0-9]{32,}'
+          git secrets --add 'ghp_[A-Za-z0-9_]{36}'
+
+      - name: Scan all commits
+        run: git secrets --scan-history
+
+  gitleaks:
+    name: GitLeaks Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  trivy:
+    name: Trivy Dependency Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy on server
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "server/"
+          scanners: "vuln,secret"
+          format: "sarif"
+          output: "trivy-server.sarif"
+          severity: "HIGH,CRITICAL"
+
+      - name: Run Trivy on client
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "client/"
+          scanners: "vuln,secret"
+          format: "sarif"
+          output: "trivy-client.sarif"
+          severity: "HIGH,CRITICAL"
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-server.sarif
+
+      - name: Upload Trivy client results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-client.sarif
+
+  checkov:
+    name: Checkov IaC Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: docker-compose,terraform
+          skip_check: CKV_DOCKER_2
