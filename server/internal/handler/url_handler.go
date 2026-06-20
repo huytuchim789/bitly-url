@@ -62,7 +62,7 @@ func (h *URLHandler) Redirect(c *gin.Context) {
 		c.Error(err)
 		return
 	}
-	c.Redirect(http.StatusMovedPermanently, url.Original)
+	c.Redirect(http.StatusFound, url.Original)
 }
 
 // List       godoc
