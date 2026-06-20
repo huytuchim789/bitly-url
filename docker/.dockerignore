@@ -1,0 +1,26 @@
+# Ignore everything by default
+**
+
+# Allow specific files needed for docker build
+!server/
+!client/
+!docker/nginx/
+!docker/prometheus/
+!docker/server/
+!docker/client/
+
+# But exclude junk from those allowed dirs
+**/.git/
+**/node_modules/
+**/.next/
+**/target/
+**/bin/
+**/out/
+**/coverage/
+**/.husky/
+**/.github/
+*.md
+.env*
+.gitignore
+Makefile
+pnpm-lock.yaml

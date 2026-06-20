@@ -1,8 +1,8 @@
-.PHONY: install dev dev-client build build-server build-client swag sqlc gen db-up db-migrate db-down db-reset dc-up dc-down dc-logs lint lint-server lint-client clean setup-hooks act-lint act-build act-security help
+.PHONY: install dev dev-client build build-server build-client build-local-server build-local-client swag db-up db-down db-reset dc-up-local dc-down-local dc-up-prod dc-down-prod lint lint-server lint-client clean help
 
 # === Install Everything ===
 
-install: install-backend install-frontend install-tools install-hooks install-git-secrets gen
+install: install-backend install-frontend install-tools install-hooks install-git-secrets swag
 	@echo "========================================"
 	@echo "  All set! Run 'make dev' to start."
 	@echo "========================================"
@@ -18,8 +18,6 @@ install-frontend:
 install-tools:
 	@echo "[tools] Installing CLI tools..."
 	go install github.com/swaggo/swag/cmd/swag@latest
-	go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-	go install github.com/air-verse/air@latest
 
 install-hooks:
 	@echo "[hooks] Setting up git hooks..."
@@ -49,32 +47,37 @@ endif
 
 # === Development ===
 
-dev: db-up
+dev: dc-up-local
 	@echo "Starting server in dev mode..."
 	cd server && go run ./cmd/main.go
 
 dev-client:
 	cd client && pnpm run dev
 
-# === Build ===
+# === Docker Image Build ===
 
 build-server:
-	cd server && go build -o bin/server ./cmd/main.go
+	docker build -t bitly-url-server -f docker/server/Dockerfile server/
 
 build-client:
-	cd client && pnpm run build
+	docker build -t bitly-url-client -f docker/client/Dockerfile client/
 
 build: build-server build-client
+
+# === Local Dev Build ===
+
+build-local-server:
+	cd server && go build -o bin/server ./cmd/main.go
+
+build-local-client:
+	cd client && pnpm run build
+
+build-local: build-local-server build-local-client
 
 # === Code Generation ===
 
 swag:
-	cd server && swag init -g cmd/main.go --output docs
-
-sqlc:
-	cd server && sqlc generate
-
-gen: swag sqlc
+	cd server && swag init -g cmd/main.go --output docs 2>/dev/null || true
 
 # === Database ===
 
@@ -86,24 +89,25 @@ db-up:
 		-p 5432:5432 \
 		postgres:16-alpine 2>/dev/null || echo "Container already running"
 
-db-migrate:
-	docker exec -i bitly-db psql -U postgres -d bitly < server/db/migrations/001_create_urls.sql
-
 db-down:
 	docker stop bitly-db 2>/dev/null || echo "Container not running"
 
-db-reset: db-down db-up db-migrate
+db-reset: db-down db-up
+	@echo "Run migration manually: docker exec -i bitly-db psql -U postgres -d bitly < server/db/migrations/001_init.sql"
 
 # === Docker Compose ===
 
-dc-up:
-	docker compose up --build -d
+dc-up-local:
+	docker compose -f docker/compose/compose.local.yaml up -d
 
-dc-down:
-	docker compose down
+dc-down-local:
+	docker compose -f docker/compose/compose.local.yaml down
 
-dc-logs:
-	docker compose logs -f
+dc-up-prod:
+	docker compose -f docker/compose/compose.prod.yaml up -d
+
+dc-down-prod:
+	docker compose -f docker/compose/compose.prod.yaml down
 
 # === Lint & Clean ===
 
@@ -117,7 +121,6 @@ lint: lint-server lint-client
 
 clean:
 	rm -rf server/bin
-	rm -rf server/internal/dbgen
 	rm -rf server/docs
 	rm -rf client/.next
 	rm -rf client/out
@@ -126,15 +129,11 @@ clean:
 
 help:
 	@echo "Usage:"
-	@echo "  make install       Install everything (deps + tools + hooks + git-secrets)"
-	@echo "  make dev           Start server locally (auto-starts Postgres)"
-	@echo "  make dev-client    Start Next.js dev server"
-	@echo "  make build         Build both server and client"
-	@echo "  make swag          Generate OpenAPI docs"
-	@echo "  make sqlc          Generate Go code from SQL"
-	@echo "  make gen           Run all code generators (swag + sqlc)"
-	@echo "  make db-up         Start Postgres container"
-	@echo "  make db-migrate    Run SQL migrations"
-	@echo "  make dc-up         Start everything with Docker Compose"
-	@echo "  make dc-down       Stop Docker Compose"
-	@echo "  make lint          Run lint for both client and server"
+	@echo "  make install        Install everything (deps + tools + hooks)"
+	@echo "  make dev            Start server locally (auto-starts Postgres)"
+	@echo "  make dev-client     Start Next.js dev server"
+	@echo "  make build          Build Docker images for server + client"
+	@echo "  make dc-up-local    Start infra only (db, redis, prometheus)"
+	@echo "  make dc-up-prod     Start full production stack"
+	@echo "  make swag           Generate OpenAPI docs"
+	@echo "  make lint           Run linters"
