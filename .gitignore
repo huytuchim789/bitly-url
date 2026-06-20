@@ -29,8 +29,6 @@ npm-debug.log*
 # Generated code
 server/internal/dbgen/
 
-# Swagger docs (auto-generated)
-server/docs/
 
 # Go
 server/tmp/

@@ -1,0 +1,148 @@
+definitions:
+  entity.URL:
+    properties:
+      clicks:
+        type: integer
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      id:
+        type: string
+      original:
+        type: string
+      short:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  handler.ShortenRequest:
+    properties:
+      expires_in:
+        description: 'optional: "24h", "7d", "30d"'
+        type: string
+      url:
+        type: string
+    required:
+    - url
+    type: object
+info:
+  contact: {}
+paths:
+  /{short}:
+    get:
+      description: Redirect to the original URL using the short code
+      parameters:
+      - description: Short code
+        in: path
+        name: short
+        required: true
+        type: string
+      responses:
+        "302":
+          description: Found
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "410":
+          description: Gone
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Redirect to original URL
+      tags:
+      - urls
+  /api/shorten:
+    post:
+      consumes:
+      - application/json
+      description: Create a short URL from a long URL
+      parameters:
+      - description: URL to shorten
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ShortenRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/entity.URL'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Shorten a URL
+      tags:
+      - urls
+  /api/urls:
+    get:
+      description: Get all shortened URLs with pagination
+      parameters:
+      - description: Limit (default 50)
+        in: query
+        name: limit
+        type: integer
+      - description: Offset (default 0)
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/entity.URL'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all URLs
+      tags:
+      - urls
+  /api/urls/{short}:
+    get:
+      description: Get the original URL for a short code
+      parameters:
+      - description: Short code
+        in: path
+        name: short
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/entity.URL'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get URL by short code
+      tags:
+      - urls
+swagger: "2.0"
