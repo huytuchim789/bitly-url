@@ -77,7 +77,7 @@ make install
 docker compose -f docker/compose/compose.local.yaml up -d
 
 # 3. Migration (auto-run, manual if needed)
-docker exec -i bitly-url-db-1 psql -U postgres -d bitly < server/db/migrations/001_init.sql
+docker exec -i bitly-db-1 psql -U postgres -d bitly < server/db/migrations/001_init.sql
 
 # 4. Backend
 cd server && go run ./cmd/main.go

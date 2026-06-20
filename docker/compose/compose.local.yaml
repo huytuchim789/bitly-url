@@ -1,3 +1,5 @@
+name: bitly
+
 services:
   db:
     image: postgres:16-alpine
@@ -5,6 +7,8 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: bitly
+    ports:
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ../../server/db/migrations:/docker-entrypoint-initdb.d
@@ -16,42 +20,13 @@ services:
 
   redis:
     image: redis:7-alpine
+    ports:
+      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
-
-  server:
-    image: bitly-url-server
-    environment:
-      PORT: "8080"
-      DATABASE_URL: "postgres://postgres:postgres@db:5432/bitly?sslmode=disable"
-      REDIS_URL: "redis://redis:6379/0"
-      GIN_MODE: release
-      ENVIRONMENT: production
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  client:
-    image: bitly-url-client
-    environment:
-      NEXT_PUBLIC_API_URL: ""
-    depends_on:
-      - server
-
-  nginx:
-    build:
-      context: ../../
-      dockerfile: docker/nginx/Dockerfile
-    ports:
-      - "80:80"
-    depends_on:
-      - server
-      - client
 
   prometheus:
     image: prom/prometheus
